@@ -1,6 +1,7 @@
 from transformers import AutoModel, AutoFeatureExtractor
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast, GPT2Config
 from datasets import load_from_disk
+from peft import LoraConfig, get_peft_model
 import torch
 
 
@@ -21,7 +22,6 @@ for param in vit_model.parameters():
 
 
 #---------setting up the language model-------------
-lang_model = GPT2LMHeadModel.from_pretrained("gpt2")
 tokenizer = GPT2TokenizerFast.from_pretrained(
     TOKENIZER,
     unk_token="<unk>",
@@ -30,5 +30,23 @@ tokenizer = GPT2TokenizerFast.from_pretrained(
     pad_token="<pad>",
     mask_token="<mask>"
 )
+
+config = GPT2Config.from_pretrained("gpt2", add_cross_attention=True)
+lang_model = GPT2LMHeadModel.from_pretrained("gpt2", config=config)
 lang_model.resize_token_embeddings(len(tokenizer))
+#---------------------------------------------------
+
+
+#---------------Lora configuration------------------
+lora_config = LoraConfig(
+    r=8,
+    lora_alpha=16,
+    target_modules=["c_attn"],  
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+lang_model = get_peft_model(lang_model, lora_config)
+lang_model.print_trainable_parameters()
 #---------------------------------------------------
