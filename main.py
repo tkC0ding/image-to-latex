@@ -1,4 +1,4 @@
-from transformers import AutoModel, AutoFeatureExtractor
+from transformers import AutoModel, AutoFeatureExtractor, Trainer, TrainingArguments
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast, GPT2Config
 from datasets import load_from_disk
 from peft import LoraConfig, get_peft_model
@@ -72,6 +72,9 @@ def preprocess(example):
 
 tokenized_train = dataset['train'].map(preprocess, batched=True)
 tokenized_validation = dataset['validation'].map(preprocess, batched=True)
+
+tokenized_train.set_format(type="torch", columns=['pixel_values', 'input_ids', 'attention_mask'])
+tokenized_validation.set_format(type="torch", columns=['pixel_values', 'input_ids', 'attention_mask'])
 #---------------------------------------------------
 
 #--------------------build custom model-------------
@@ -102,3 +105,41 @@ class ViT_GPT(nn.Module):
 
         return outputs
 #---------------------------------------------------
+
+model = ViT_GPT(extractor, vit_model, lang_model)
+
+def collate_fn(batch):
+    input_ids = torch.stack([item["input_ids"] for item in batch])
+    attention_mask = torch.stack([item["attention_mask"] for item in batch])
+    images = [item["image"] for item in batch]  # list of PIL images or tensors
+    labels = torch.stack([item["input_ids"] for item in batch])
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "images": images,
+        "labels": labels
+    }
+
+training_args = TrainingArguments(
+    output_dir="./results",
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    num_train_epochs=3,
+    logging_dir="./logs",
+    logging_steps=50,
+    learning_rate=5e-5,
+    fp16=torch.cuda.is_available()
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_train,
+    eval_dataset=tokenized_validation,
+    tokenizer=tokenizer,
+    data_collator=collate_fn
+)
+
+trainer.train()
