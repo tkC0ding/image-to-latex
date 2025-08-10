@@ -3,6 +3,7 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast, GPT2Config
 from datasets import load_from_disk
 from peft import LoraConfig, get_peft_model
 import torch
+from torch import nn
 
 
 #global variables
@@ -49,4 +50,55 @@ lora_config = LoraConfig(
 
 lang_model = get_peft_model(lang_model, lora_config)
 lang_model.print_trainable_parameters()
+#---------------------------------------------------
+
+
+#----------------preprare dataset-------------------
+def preprocess(example):
+    pixel_values = extractor(example['image'], return_tensors='pt').pixel_values
+    example['pixel_values'] = pixel_values
+
+    tokenized = tokenizer(
+        example['latex_formula'],
+        truncation=True,
+        padding="max_length",
+        max_length=256
+    )
+    
+    example['input_ids'] = tokenized['input_ids']
+    example['attention_mask'] = tokenized['attention_mask']
+
+    return example
+
+tokenized_train = dataset['train'].map(preprocess, batched=True)
+tokenized_validation = dataset['validation'].map(preprocess, batched=True)
+#---------------------------------------------------
+
+#--------------------build custom model-------------
+class ViT_GPT(nn.Module):
+    def __init__(self, extractor, vit_model, gpt_model):
+        super().__init__()
+        self.extractor = extractor
+        self.vit_model = vit_model
+        self.gpt_model = gpt_model
+
+        nn.ModuleList([self.extractor, self.vit_model, self.gpt_model])
+    
+    def forward(self, input_ids, attention_mask, images, labels=None):
+        pixel_values = self.extractor(images, return_tensors='pt').pixel_values
+
+        with torch.no_grad():
+            encoder_hidden_states = self.vit_model(pixel_values).last_hidden_state
+        
+        encoder_attention_mask = torch.ones(encoder_hidden_states.size()[:-1], device=input_ids.device).long()
+
+        outputs = self.gpt_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            labels=labels
+        )
+
+        return outputs
 #---------------------------------------------------
